@@ -1,10 +1,11 @@
+// lib/webllm/models.ts
 import { ModelConfig } from '@/lib/types';
 
 export const MODELS: Record<string, ModelConfig> = {
   low: {
-    id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',
-    displayName: 'Llama 3.2 1B (4-bit)',
-    sizeGB: 0.8,
+    id: 'SmolLM2-360M-Instruct-q0f16-MLC',
+    displayName: 'SmolLM2 360M (fastest)',
+    sizeGB: 0.4,
     quantization: '4bit',
     minRAMGB: 2,
     requiresWebGPU: true,
