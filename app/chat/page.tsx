@@ -1,32 +1,70 @@
+// app/chat/page.tsx
 'use client';
 
 import { useState } from 'react';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
+import { useDeviceCapability } from '@/hooks/useDeviceCapability';
+import { DeviceCheck } from '@/components/loading/DeviceCheck';
+import { ModelLoader } from '@/components/loading/ModelLoader';
 import { ModelStatus } from '@/lib/types';
-import { MODELS } from '@/lib/webllm/models';
 
 export default function ChatPage() {
   const engine = useWebLLMEngine();
-  const [status, setStatus] = useState<ModelStatus>(ModelStatus.UNLOADED);
-  const [progressText, setProgressText] = useState('');
+  const deviceProfile = useDeviceCapability();
+  const [modelStatus, setModelStatus] = useState<ModelStatus>(ModelStatus.UNLOADED);
+  const [errorMsg, setErrorMsg] = useState('');
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
 
-  async function handleLoadModel() {
-    setStatus(ModelStatus.LOADING);
-    try {
-      await engine.load(MODELS['low'].id, (report) => {
-        setProgressText(report.text);
-      });
-      setStatus(ModelStatus.READY);
-      setProgressText('Model ready.');
-    } catch (err) {
-      setStatus(ModelStatus.ERROR);
-      setProgressText('Failed: ' + String(err));
-    }
+  // Wait for device detection
+  if (!deviceProfile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <p className="text-zinc-500 text-sm">Checking device...</p>
+      </div>
+    );
   }
 
+  // WebGPU gate
+  if (!deviceProfile.hasWebGPU) {
+    return <DeviceCheck hasWebGPU={false}>{null}</DeviceCheck>;
+  }
+
+  // Loading screen
+  if (modelStatus === ModelStatus.UNLOADED || modelStatus === ModelStatus.LOADING) {
+    return (
+      <ModelLoader
+        model={deviceProfile.selectedModel}
+        onLoad={(onProgress) => engine.load(deviceProfile.selectedModel.id, onProgress)}
+        onReady={() => setModelStatus(ModelStatus.READY)}
+        onError={(err) => {
+          setErrorMsg(err);
+          setModelStatus(ModelStatus.ERROR);
+        }}
+      />
+    );
+  }
+
+  // Error state
+  if (modelStatus === ModelStatus.ERROR) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="max-w-sm text-center px-8">
+          <p className="text-red-400 text-sm font-medium mb-2">Failed to load model</p>
+          <p className="text-zinc-500 text-xs mb-6">{errorMsg}</p>
+          <button
+            onClick={() => setModelStatus(ModelStatus.UNLOADED)}
+            className="text-white bg-zinc-800 hover:bg-zinc-700 text-sm px-4 py-2 rounded-lg transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Chat UI (temporary inline version — will be replaced Day 3)
   async function handleSend() {
     if (!input.trim() || isStreaming) return;
     const userMsg = { role: 'user', content: input.trim() };
@@ -48,48 +86,64 @@ export default function ChatPage() {
   }
 
   return (
-    <div style={{ padding: '2rem', maxWidth: '800px', margin: '0 auto', fontFamily: 'monospace' }}>
-      <h1>VoidChats — Day 1</h1>
-
-      <div style={{ marginBottom: '1rem', color: '#888' }}>
-        Status: <strong>{status}</strong>
-        {progressText && <div style={{ fontSize: '0.8rem', marginTop: '4px' }}>{progressText}</div>}
+    <div className="min-h-screen bg-black flex flex-col">
+      {/* Header */}
+      <div className="border-b border-zinc-800 px-6 py-4">
+        <div className="flex items-center justify-between max-w-3xl mx-auto">
+          <h1 className="text-white font-medium">VoidChats</h1>
+          <span className="text-zinc-500 text-xs">
+            {deviceProfile.selectedModel.displayName} · local
+          </span>
+        </div>
       </div>
 
-      {status === ModelStatus.UNLOADED && (
-        <button onClick={handleLoadModel} style={{ marginBottom: '1rem', padding: '0.5rem 1rem' }}>
-          Load Model (~800MB first time)
-        </button>
-      )}
-
-      <div style={{
-        border: '1px solid #333', minHeight: '300px', maxHeight: '500px',
-        overflowY: 'auto', padding: '1rem', marginBottom: '1rem', background: '#0a0a0a',
-      }}>
-        {messages.length === 0
-          ? <div style={{ color: '#444' }}>Load model then type a message...</div>
-          : messages.map((msg, i) => (
-            <div key={i} style={{ marginBottom: '1rem', color: msg.role === 'user' ? '#60a5fa' : '#a3e635' }}>
-              <strong>{msg.role}:</strong> {msg.content}
-              {isStreaming && i === messages.length - 1 && msg.role === 'assistant' && <span>▋</span>}
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="max-w-3xl mx-auto space-y-6">
+          {messages.length === 0 && (
+            <div className="text-center mt-20">
+              <p className="text-zinc-600 text-sm">
+                Your conversation stays on this device.
+              </p>
             </div>
-          ))
-        }
+          )}
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-xl px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                msg.role === 'user'
+                  ? 'bg-white text-black'
+                  : 'bg-zinc-900 text-zinc-100'
+              }`}>
+                {msg.content}
+                {isStreaming && i === messages.length - 1 && msg.role === 'assistant' && (
+                  <span className="inline-block w-1.5 h-4 bg-zinc-400 ml-0.5 animate-pulse" />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <input
-          type="text" value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          disabled={status !== ModelStatus.READY || isStreaming}
-          placeholder={status === ModelStatus.READY ? 'Type a message...' : 'Load model first'}
-          style={{ flex: 1, padding: '0.5rem', background: '#111', color: '#fff', border: '1px solid #333' }}
-        />
-        <button onClick={handleSend} disabled={status !== ModelStatus.READY || isStreaming}
-          style={{ padding: '0.5rem 1rem' }}>
-          {isStreaming ? 'Thinking...' : 'Send'}
-        </button>
+      {/* Input */}
+      <div className="border-t border-zinc-800 px-6 py-4">
+        <div className="max-w-3xl mx-auto flex gap-3">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            disabled={isStreaming}
+            placeholder="Message VoidChats..."
+            className="flex-1 bg-zinc-900 text-white text-sm px-4 py-3 rounded-xl border border-zinc-800 focus:outline-none focus:border-zinc-600 placeholder-zinc-600 transition-colors"
+          />
+          <button
+            onClick={handleSend}
+            disabled={isStreaming || !input.trim()}
+            className="bg-white text-black text-sm font-medium px-5 py-3 rounded-xl hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {isStreaming ? '...' : 'Send'}
+          </button>
+        </div>
       </div>
     </div>
   );
