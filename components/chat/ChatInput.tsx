@@ -7,9 +7,19 @@ interface Props {
   onSend: (message: string) => void;
   disabled: boolean;
   isStreaming: boolean;
+  contextTokensUsed: number;
+  contextTokenBudget: number;
+  isNearLimit: boolean;
 }
 
-export function ChatInput({ onSend, disabled, isStreaming }: Props) {
+export function ChatInput({
+  onSend,
+  disabled,
+  isStreaming,
+  contextTokensUsed,
+  contextTokenBudget,
+  isNearLimit,
+}: Props) {
   const [input, setInput] = useState('');
 
   function handleSend() {
@@ -73,9 +83,14 @@ export function ChatInput({ onSend, disabled, isStreaming }: Props) {
           )}
         </button>
       </div>
-      <p className="text-zinc-700 text-xs text-center mt-2">
-        Enter to send · Shift+Enter for new line
-      </p>
+      <div className="max-w-3xl mx-auto mt-2 flex items-center justify-between gap-3 text-xs">
+        <p className={isNearLimit ? 'text-amber-400' : 'text-zinc-700'}>
+          Context: {contextTokensUsed} / {contextTokenBudget} tokens
+        </p>
+        <p className="text-zinc-700 text-right">
+          Enter to send - Shift+Enter for new line
+        </p>
+      </div>
     </div>
   );
 }

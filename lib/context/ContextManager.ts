@@ -2,11 +2,13 @@
 import { Message, ContextWindow } from '@/lib/types';
 import { estimateMessageTokens } from './tokenCounter';
 
+export const CONTEXT_TOKEN_BUDGET = 1500;
+
 export class ContextManager {
   private messages: Message[] = [];
 
-  // Token budget — leave room for system prompt + response
-  private readonly TOKEN_BUDGET = 1500;
+  // Token budget - leave room for system prompt + response
+  private readonly TOKEN_BUDGET = CONTEXT_TOKEN_BUDGET;
 
   // Always keep last N exchanges regardless of token count
   private readonly RECENCY_ANCHOR = 2;
@@ -27,9 +29,9 @@ export class ContextManager {
   }
 
   /**
-   * FIFO eviction — builds context window within token budget.
+   * FIFO eviction - builds context window within token budget.
    * Always keeps: system prompt + last RECENCY_ANCHOR exchanges.
-   * Fills remaining budget with oldest messages first.
+   * Fills remaining budget with older messages first.
    * Evicts from the middle when over budget.
    */
   buildContext(): ContextWindow {
@@ -68,7 +70,7 @@ export class ContextManager {
       };
     }
 
-    // Fill remaining budget with older messages (FIFO — keep newest)
+    // Fill remaining budget with older messages (FIFO - keep newest)
     let remainingBudget = budget - recentTokens;
     const selected: Message[] = [];
 
@@ -80,7 +82,7 @@ export class ContextManager {
         selected.unshift(msg); // add to front to preserve order
         remainingBudget -= tokens;
       } else {
-        break; // stop — remaining messages won't fit either
+        break; // stop - remaining messages will not fit either
       }
     }
 
@@ -113,6 +115,7 @@ export class ContextManager {
       (sum, m) => sum + estimateMessageTokens(m.role, m.content),
       0
     );
+
     return {
       totalMessages,
       estimatedTokens,

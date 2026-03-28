@@ -1,4 +1,3 @@
-// components/chat/ChatContainer.tsx
 'use client';
 
 import { useState } from 'react';
@@ -7,6 +6,9 @@ import { Message, DeviceProfile } from '@/lib/types';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
+import {
+  CONTEXT_TOKEN_BUDGET,
+} from '@/lib/context/ContextManager';
 import { useContextManager } from '@/hooks/useContextManager';
 import { estimateMessageTokens } from '@/lib/context/tokenCounter';
 
@@ -14,11 +16,24 @@ interface Props {
   deviceProfile: DeviceProfile;
 }
 
+type ContextUsageState = {
+  usedTokens: number;
+  isNearLimit: boolean;
+};
+
+const EMPTY_CONTEXT_USAGE: ContextUsageState = {
+  usedTokens: 0,
+  isNearLimit: false,
+};
+
 export function ChatContainer({ deviceProfile }: Props) {
   const engine = useWebLLMEngine();
   const { addMessage, buildContext, clearMessages, getStats } = useContextManager();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [contextUsage, setContextUsage] = useState<ContextUsageState>(
+    EMPTY_CONTEXT_USAGE
+  );
 
   async function handleSend(content: string) {
     if (isStreaming) return;
@@ -33,11 +48,11 @@ export function ChatContainer({ deviceProfile }: Props) {
 
     addMessage(userMessage);
     const contextWindow = buildContext();
-      console.log('[DEBUG]', {
-        contextMessages: contextWindow.messages.length,
-        evicted: contextWindow.evictedCount,
-        strategy: contextWindow.evictionStrategy,
-        });
+    const userStats = getStats();
+    setContextUsage({
+      usedTokens: contextWindow.totalTokens,
+      isNearLimit: userStats.isNearLimit,
+    });
 
     const assistantMessage: Message = {
       id: uuidv4(),
@@ -53,7 +68,8 @@ export function ChatContainer({ deviceProfile }: Props) {
     const engineMessages = [
       {
         role: 'system' as const,
-        content: "You are a helpful, private AI assistant running entirely on the user's device. Be concise and accurate.",
+        content:
+          "You are a helpful, private AI assistant running entirely on the user's device. Be concise and accurate.",
       },
       ...contextWindow.messages.map((m) => ({
         role: m.role as 'user' | 'assistant' | 'system',
@@ -84,13 +100,19 @@ export function ChatContainer({ deviceProfile }: Props) {
       };
       addMessage(completedAssistant);
 
+      const updatedContextWindow = buildContext();
+      const stats = getStats();
+      setContextUsage({
+        usedTokens: updatedContextWindow.totalTokens,
+        isNearLimit: stats.isNearLimit,
+      });
+
       if (process.env.NODE_ENV === 'development') {
-        const stats = getStats();
         console.log('[ContextManager]', {
           totalMessages: stats.totalMessages,
           estimatedTokens: stats.estimatedTokens,
-          evictedCount: contextWindow.evictedCount,
-          strategy: contextWindow.evictionStrategy,
+          evictedCount: updatedContextWindow.evictedCount,
+          strategy: updatedContextWindow.evictionStrategy,
           isNearLimit: stats.isNearLimit,
         });
       }
@@ -111,6 +133,7 @@ export function ChatContainer({ deviceProfile }: Props) {
   function handleClear() {
     clearMessages();
     setMessages([]);
+    setContextUsage(EMPTY_CONTEXT_USAGE);
   }
 
   return (
@@ -120,7 +143,7 @@ export function ChatContainer({ deviceProfile }: Props) {
           <h1 className="text-white font-medium">VoidChats</h1>
           <div className="flex items-center gap-4">
             <span className="text-zinc-500 text-xs">
-              {deviceProfile.selectedModel.displayName} · local
+              {deviceProfile.selectedModel.displayName} - local
             </span>
             {messages.length > 0 && (
               <button
@@ -140,6 +163,9 @@ export function ChatContainer({ deviceProfile }: Props) {
         onSend={handleSend}
         disabled={isStreaming}
         isStreaming={isStreaming}
+        contextTokensUsed={contextUsage.usedTokens}
+        contextTokenBudget={CONTEXT_TOKEN_BUDGET}
+        isNearLimit={contextUsage.isNearLimit}
       />
     </div>
   );
