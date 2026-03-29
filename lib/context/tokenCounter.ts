@@ -1,9 +1,10 @@
 // lib/context/tokenCounter.ts
 
+export const CONTEXT_TOKEN_BUDGET = 1500;
+
 /**
  * Estimates token count for a string.
  * Rule of thumb: ~4 characters per token for English text.
- * Good enough without running tiktoken in-browser.
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -18,4 +19,4 @@ export function estimateMessageTokens(
   content: string
 ): number {
   return estimateTokens(content) + 4;
-}
+} 

@@ -1,16 +1,16 @@
 // lib/context/ContextManager.ts
 import { Message, ContextWindow } from '@/lib/types';
 import { estimateMessageTokens } from './tokenCounter';
+import { rankByRelevance } from './semanticEviction';
 
 export const CONTEXT_TOKEN_BUDGET = 1500;
 
 export class ContextManager {
   private messages: Message[] = [];
 
-  // Token budget - leave room for system prompt + response
   private readonly TOKEN_BUDGET = CONTEXT_TOKEN_BUDGET;
 
-  // Always keep last N exchanges regardless of token count
+  // Always keep last N exchanges regardless of relevance score
   private readonly RECENCY_ANCHOR = 2;
 
   private readonly SYSTEM_PROMPT =
@@ -29,10 +29,9 @@ export class ContextManager {
   }
 
   /**
-   * FIFO eviction - builds context window within token budget.
-   * Always keeps: system prompt + last RECENCY_ANCHOR exchanges.
-   * Fills remaining budget with older messages first.
-   * Evicts from the middle when over budget.
+   * FIFO eviction — fills budget from newest to oldest.
+   * Used as fallback when semantic eviction fails.
+   * Also used on short conversations where eviction hasn't kicked in yet.
    */
   buildContext(): ContextWindow {
     const systemTokens = estimateMessageTokens('system', this.SYSTEM_PROMPT);
@@ -47,8 +46,7 @@ export class ContextManager {
       };
     }
 
-    // Always include recent messages (recency anchor)
-    const anchorCount = this.RECENCY_ANCHOR * 2; // user + assistant pairs
+    const anchorCount = this.RECENCY_ANCHOR * 2;
     const recentMessages = this.messages.slice(-anchorCount);
     const olderMessages = this.messages.slice(0, -anchorCount);
 
@@ -60,29 +58,30 @@ export class ContextManager {
     // Edge case: recent messages alone exceed budget
     if (recentTokens >= budget) {
       return {
-        messages: recentMessages.slice(-2), // keep at least last exchange
-        totalTokens: recentMessages.slice(-2).reduce(
-          (sum, m) => sum + estimateMessageTokens(m.role, m.content),
-          systemTokens
-        ),
+        messages: recentMessages.slice(-2),
+        totalTokens: recentMessages
+          .slice(-2)
+          .reduce(
+            (sum, m) => sum + estimateMessageTokens(m.role, m.content),
+            systemTokens
+          ),
         evictedCount: this.messages.length - 2,
         evictionStrategy: 'fifo',
       };
     }
 
-    // Fill remaining budget with older messages (FIFO - keep newest)
     let remainingBudget = budget - recentTokens;
     const selected: Message[] = [];
 
-    // Iterate from most recent older message backwards
+    // Fill from most recent older message backwards
     for (let i = olderMessages.length - 1; i >= 0; i--) {
       const msg = olderMessages[i];
       const tokens = estimateMessageTokens(msg.role, msg.content);
       if (tokens <= remainingBudget) {
-        selected.unshift(msg); // add to front to preserve order
+        selected.unshift(msg);
         remainingBudget -= tokens;
       } else {
-        break; // stop - remaining messages will not fit either
+        break;
       }
     }
 
@@ -102,8 +101,112 @@ export class ContextManager {
   }
 
   /**
+   * SEMANTIC eviction — smarter than FIFO.
+   *
+   * Algorithm:
+   * 1. Always keep last RECENCY_ANCHOR exchanges (recency anchor)
+   * 2. Rank older messages by cosine similarity to current query
+   * 3. Greedily fill remaining token budget with most relevant messages
+   * 4. Restore chronological order for the LLM
+   *
+   * Falls back to FIFO if embedding computation fails.
+   */
+  async buildContextSemantic(currentQuery: string): Promise<ContextWindow> {
+    const systemTokens = estimateMessageTokens('system', this.SYSTEM_PROMPT);
+    const budget = this.TOKEN_BUDGET - systemTokens;
+
+    if (this.messages.length === 0) {
+      return {
+        messages: [],
+        totalTokens: systemTokens,
+        evictedCount: 0,
+        evictionStrategy: 'none',
+      };
+    }
+
+    const anchorCount = this.RECENCY_ANCHOR * 2;
+    const recentMessages = this.messages.slice(-anchorCount);
+    const olderMessages = this.messages.slice(0, -anchorCount);
+
+    const recentTokens = recentMessages.reduce(
+      (sum, m) => sum + estimateMessageTokens(m.role, m.content),
+      0
+    );
+
+    // Edge case: recent messages alone exceed budget
+    if (recentTokens >= budget) {
+      return {
+        messages: recentMessages.slice(-2),
+        totalTokens: recentMessages
+          .slice(-2)
+          .reduce(
+            (sum, m) => sum + estimateMessageTokens(m.role, m.content),
+            systemTokens
+          ),
+        evictedCount: this.messages.length - 2,
+        evictionStrategy: 'semantic',
+      };
+    }
+
+    // No older messages to rank — return recent only
+    if (olderMessages.length === 0) {
+      return {
+        messages: recentMessages,
+        totalTokens: recentTokens + systemTokens,
+        evictedCount: 0,
+        evictionStrategy: 'none',
+      };
+    }
+
+    const remainingBudget = budget - recentTokens;
+    let ranked: Array<{ message: Message; score: number }>;
+
+    try {
+      // Rank older messages by semantic relevance to current query
+      ranked = await rankByRelevance(olderMessages, currentQuery);
+    } catch (err) {
+      // Embedding failed — fall back to FIFO silently
+      console.warn(
+        '[ContextManager] Semantic ranking failed, falling back to FIFO:',
+        err
+      );
+      return this.buildContext();
+    }
+
+    // Greedily fill budget with most relevant messages
+    const selected: Message[] = [];
+    let usedTokens = 0;
+
+    for (const { message } of ranked) {
+      const tokens = estimateMessageTokens(message.role, message.content);
+      if (usedTokens + tokens <= remainingBudget) {
+        selected.push(message);
+        usedTokens += tokens;
+      }
+      // Don't break — a later smaller message might still fit
+    }
+
+    // Restore chronological order — LLM needs time-ordered context
+    selected.sort((a, b) => a.timestamp - b.timestamp);
+
+    const evictedCount = olderMessages.length - selected.length;
+    const finalMessages = [...selected, ...recentMessages];
+    const totalTokens = finalMessages.reduce(
+      (sum, m) => sum + estimateMessageTokens(m.role, m.content),
+      systemTokens
+    );
+
+    return {
+      messages: finalMessages,
+      totalTokens,
+      evictedCount,
+      evictionStrategy: evictedCount > 0 ? 'semantic' : 'none',
+    };
+  }
+
+  /**
    * Returns stats about current context state.
-   * Used by DevInfoPanel on Day 10.
+   * Used by DevInfoPanel (Day 10) and ChatInput footer.
    */
   getStats(): {
     totalMessages: number;
@@ -115,7 +218,6 @@ export class ContextManager {
       (sum, m) => sum + estimateMessageTokens(m.role, m.content),
       0
     );
-
     return {
       totalMessages,
       estimatedTokens,

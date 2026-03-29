@@ -1,42 +1,36 @@
+// components/chat/ChatContainer.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Message, DeviceProfile } from '@/lib/types';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
-import {
-  CONTEXT_TOKEN_BUDGET,
-} from '@/lib/context/ContextManager';
 import { useContextManager } from '@/hooks/useContextManager';
-import { estimateMessageTokens } from '@/lib/context/tokenCounter';
+import { estimateMessageTokens, CONTEXT_TOKEN_BUDGET } from '@/lib/context/tokenCounter';
 
 interface Props {
   deviceProfile: DeviceProfile;
 }
 
-type ContextUsageState = {
-  usedTokens: number;
-  isNearLimit: boolean;
-};
-
-const EMPTY_CONTEXT_USAGE: ContextUsageState = {
-  usedTokens: 0,
-  isNearLimit: false,
-};
-
 export function ChatContainer({ deviceProfile }: Props) {
   const engine = useWebLLMEngine();
-  const { addMessage, buildContext, clearMessages, getStats } = useContextManager();
+  const {
+    addMessage,
+    buildContextSemantic,
+    clearMessages,
+    getStats,
+  } = useContextManager();
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [contextUsage, setContextUsage] = useState<ContextUsageState>(
-    EMPTY_CONTEXT_USAGE
-  );
+  const [isBuildingContext, setIsBuildingContext] = useState(false);
+  const [lastEvictionStrategy, setLastEvictionStrategy] = useState('none');
+  const [lastEvictedCount, setLastEvictedCount] = useState(0);
 
   async function handleSend(content: string) {
-    if (isStreaming) return;
+    if (isStreaming || isBuildingContext) return;
 
     const userMessage: Message = {
       id: uuidv4(),
@@ -46,13 +40,17 @@ export function ChatContainer({ deviceProfile }: Props) {
       tokenEstimate: estimateMessageTokens('user', content),
     };
 
+    // Add user message to context manager
     addMessage(userMessage);
-    const contextWindow = buildContext();
-    const userStats = getStats();
-    setContextUsage({
-      usedTokens: contextWindow.totalTokens,
-      isNearLimit: userStats.isNearLimit,
-    });
+
+    // Build semantic context window
+    setIsBuildingContext(true);
+    const contextWindow = await buildContextSemantic(content);
+    setIsBuildingContext(false);
+
+    // Track eviction stats
+    setLastEvictionStrategy(contextWindow.evictionStrategy);
+    setLastEvictedCount(contextWindow.evictedCount);
 
     const assistantMessage: Message = {
       id: uuidv4(),
@@ -62,9 +60,11 @@ export function ChatContainer({ deviceProfile }: Props) {
       tokenEstimate: 0,
     };
 
+    // Update UI immediately
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setIsStreaming(true);
 
+    // Build engine messages: system prompt + context window
     const engineMessages = [
       {
         role: 'system' as const,
@@ -93,6 +93,7 @@ export function ChatContainer({ deviceProfile }: Props) {
         });
       }
 
+      // Add completed assistant message to context manager
       const completedAssistant: Message = {
         ...assistantMessage,
         content: response,
@@ -100,19 +101,14 @@ export function ChatContainer({ deviceProfile }: Props) {
       };
       addMessage(completedAssistant);
 
-      const updatedContextWindow = buildContext();
-      const stats = getStats();
-      setContextUsage({
-        usedTokens: updatedContextWindow.totalTokens,
-        isNearLimit: stats.isNearLimit,
-      });
-
+      // Log context stats in development
       if (process.env.NODE_ENV === 'development') {
+        const stats = getStats();
         console.log('[ContextManager]', {
           totalMessages: stats.totalMessages,
           estimatedTokens: stats.estimatedTokens,
-          evictedCount: updatedContextWindow.evictedCount,
-          strategy: updatedContextWindow.evictionStrategy,
+          evictedCount: contextWindow.evictedCount,
+          strategy: contextWindow.evictionStrategy,
           isNearLimit: stats.isNearLimit,
         });
       }
@@ -133,17 +129,22 @@ export function ChatContainer({ deviceProfile }: Props) {
   function handleClear() {
     clearMessages();
     setMessages([]);
-    setContextUsage(EMPTY_CONTEXT_USAGE);
+    setLastEvictionStrategy('none');
+    setLastEvictedCount(0);
   }
+
+  const stats = getStats();
 
   return (
     <div className="flex flex-col h-screen bg-black">
+
+      {/* Header */}
       <div className="border-b border-zinc-800 px-6 py-4 flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <h1 className="text-white font-medium">VoidChats</h1>
           <div className="flex items-center gap-4">
             <span className="text-zinc-500 text-xs">
-              {deviceProfile.selectedModel.displayName} - local
+              {deviceProfile.selectedModel.displayName} · local
             </span>
             {messages.length > 0 && (
               <button
@@ -157,15 +158,20 @@ export function ChatContainer({ deviceProfile }: Props) {
         </div>
       </div>
 
+      {/* Messages */}
       <MessageList messages={messages} isStreaming={isStreaming} />
 
+      {/* Input */}
       <ChatInput
         onSend={handleSend}
-        disabled={isStreaming}
+        disabled={isStreaming || isBuildingContext}
         isStreaming={isStreaming}
-        contextTokensUsed={contextUsage.usedTokens}
-        contextTokenBudget={CONTEXT_TOKEN_BUDGET}
-        isNearLimit={contextUsage.isNearLimit}
+        isBuildingContext={isBuildingContext}
+        usedTokens={stats.estimatedTokens}
+        tokenBudget={CONTEXT_TOKEN_BUDGET}
+        isNearLimit={stats.isNearLimit}
+        evictionStrategy={lastEvictionStrategy}
+        evictedCount={lastEvictedCount}
       />
     </div>
   );
