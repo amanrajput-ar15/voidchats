@@ -113,3 +113,22 @@ Intel Iris Xe iGPU has shared VRAM from system RAM.
 Running a 7B model on 4GB RAM causes OOM crashes.
 Three tiers: SmolLM2-360M (low, <4GB), Llama-1B (mid, 4-7GB),
 Qwen-3B (high, 8GB+). Selection reason surfaced to user in loading screen.
+
+## Why anonymous auth for Supabase sync
+
+Requiring email/password creates friction and a privacy concern.
+Anonymous auth gives each device a persistent user ID without
+collecting any personal information. Conversations are tied to this
+anonymous ID via row-level security.
+
+Tradeoff: if the user clears browser storage, their anonymous session
+is lost and they cannot access previous synced data without re-encryption.
+Acceptable for a privacy-first app.
+
+## Why encrypt-then-upload (not upload-then-encrypt)
+
+The server must never see plaintext. Encrypting before upload means
+even if Supabase is compromised, the attacker only gets encrypted blobs.
+The passphrase never leaves the device. This is the correct model for
+client-side encryption.
+

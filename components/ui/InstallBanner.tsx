@@ -9,45 +9,37 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export function InstallBanner() {
-  const [installPrompt, setInstallPrompt] =
-    useState<BeforeInstallPromptEvent | null>(null);
+  // Initialize to null. This ensures SSR and initial client render match perfectly.
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isDismissed, setIsDismissed] = useState(false);
 
-  // ARCHITECTURE NOTE: 'isInstalled' state was removed.
-  // The browser guarantees 'beforeinstallprompt' will not fire if already installed.
-
   useEffect(() => {
-    // 1. Create stable, named references for event listeners
-    function handleBeforeInstall(e: Event) {
+    // The browser automatically dictates if the app is installed or not.
+    // It will ONLY fire this event if the app is NOT installed.
+    const handleBeforeInstall = (e: Event) => {
       e.preventDefault();
       setInstallPrompt(e as BeforeInstallPromptEvent);
-    }
-
-    function handleAppInstalled() {
-      // If the user installs via the browser's native menu while the banner is visible,
-      // this clears the prompt to unmount the banner.
-      setInstallPrompt(null);
-    }
+    };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
-      // 2. Properly detach BOTH listeners using the exact references
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
-      window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, []);
+  }, []); // No synchronous setState here! Linter is happy.
 
   async function handleInstall() {
     if (!installPrompt) return;
+    
     await installPrompt.prompt();
     const result = await installPrompt.userChoice;
+    
     if (result.outcome === 'accepted') {
       setInstallPrompt(null);
     }
   }
 
+  // If there's no prompt (like during SSR) or user dismissed it, render nothing.
   if (!installPrompt || isDismissed) return null;
 
   return (
@@ -65,6 +57,7 @@ export function InstallBanner() {
           <button
             onClick={() => setIsDismissed(true)}
             className="text-zinc-600 hover:text-zinc-400 text-xs flex-shrink-0 mt-0.5"
+            aria-label="Dismiss"
           >
             ✕
           </button>

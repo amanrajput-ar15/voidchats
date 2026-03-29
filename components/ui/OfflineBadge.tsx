@@ -1,11 +1,33 @@
 // components/ui/OfflineBadge.tsx
 'use client';
 
-import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useSyncExternalStore } from 'react';
+
+// 1. Define how to subscribe to the browser's network events
+function subscribe(callback: () => void) {
+  window.addEventListener('online', callback);
+  window.addEventListener('offline', callback);
+  return () => {
+    window.removeEventListener('online', callback);
+    window.removeEventListener('offline', callback);
+  };
+}
+
+// 2. Define how to get the current value on the client
+function getSnapshot() {
+  return navigator.onLine;
+}
+
+// 3. Define what the server should render (prevents hydration mismatch)
+function getServerSnapshot() {
+  return true; // Always assume online during SSR so it renders 'null' and matches the client
+}
 
 export function OfflineBadge() {
-  const isOnline = useOnlineStatus();
+  // 4. useSyncExternalStore entirely replaces useState, useEffect, and the 'mounted' flag!
+  const isOnline = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
+  // If we are online, render nothing.
   if (isOnline) return null;
 
   return (
