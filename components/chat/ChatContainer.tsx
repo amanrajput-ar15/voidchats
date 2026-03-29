@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Message, DeviceProfile } from '@/lib/types';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
+import { DevInfoPanel } from '@/components/ui/DevInfoPanel';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
 import { useContextManager } from '@/hooks/useContextManager';
 import { useConversation } from '@/hooks/useConversation';
@@ -17,6 +18,12 @@ import {
 
 interface Props {
   deviceProfile: DeviceProfile;
+}
+
+interface InferenceStats {
+  tokensPerSecond: number | null;
+  lastLatencyMs: number | null;
+  totalTokensGenerated: number;
 }
 
 export function ChatContainer({ deviceProfile }: Props) {
@@ -31,13 +38,17 @@ export function ChatContainer({ deviceProfile }: Props) {
   const [isBuildingContext, setIsBuildingContext] = useState(false);
   const [lastEvictionStrategy, setLastEvictionStrategy] = useState('none');
   const [lastEvictedCount, setLastEvictedCount] = useState(0);
+  const [inferenceStats, setInferenceStats] = useState<InferenceStats>({
+    tokensPerSecond: null,
+    lastLatencyMs: null,
+    totalTokensGenerated: 0,
+  });
 
   const currentConvIdRef = useRef<string | null>(null);
 
   async function handleSend(content: string) {
     if (isStreaming || isBuildingContext) return;
 
-    // Block inference on critically low battery
     if (battery.isCritical) {
       setMessages((prev) => [
         ...prev,
@@ -108,8 +119,13 @@ export function ChatContainer({ deviceProfile }: Props) {
 
     try {
       let response = '';
+      const sendTime = Date.now();
+      let firstTokenTime: number | null = null;
+      let tokenCount = 0;
 
       for await (const token of engine.streamCompletion(engineMessages)) {
+        if (firstTokenTime === null) firstTokenTime = Date.now();
+        tokenCount++;
         response += token;
         setMessages((prev) => {
           const updated = [...prev];
@@ -121,6 +137,20 @@ export function ChatContainer({ deviceProfile }: Props) {
           return updated;
         });
       }
+
+      // Measure inference performance
+      const endTime = Date.now();
+      const durationSec =
+        (endTime - (firstTokenTime ?? sendTime)) / 1000;
+      const tps =
+        durationSec > 0 ? Math.round(tokenCount / durationSec) : null;
+      const latencyMs = firstTokenTime ? firstTokenTime - sendTime : null;
+
+      setInferenceStats((prev) => ({
+        tokensPerSecond: tps,
+        lastLatencyMs: latencyMs,
+        totalTokensGenerated: prev.totalTokensGenerated + tokenCount,
+      }));
 
       const completedAssistant: Message = {
         ...assistantMessage,
@@ -145,6 +175,11 @@ export function ChatContainer({ deviceProfile }: Props) {
           evictedCount: contextWindow.evictedCount,
           strategy: contextWindow.evictionStrategy,
           isNearLimit: stats.isNearLimit,
+        });
+        console.log('[Inference]', {
+          tokensPerSecond: tps,
+          latencyMs,
+          totalTokens: tokenCount,
         });
       }
     } catch (err) {
@@ -174,7 +209,7 @@ export function ChatContainer({ deviceProfile }: Props) {
   return (
     <div className="flex flex-col h-screen bg-black">
 
-      {/* Battery warning banner */}
+      {/* Battery warning */}
       {battery.isLowBattery && (
         <div className="bg-amber-950 border-b border-amber-800 px-6 py-2 flex-shrink-0">
           <p className="text-amber-400 text-xs text-center max-w-3xl mx-auto">
@@ -219,6 +254,17 @@ export function ChatContainer({ deviceProfile }: Props) {
         evictionStrategy={lastEvictionStrategy}
         evictedCount={lastEvictedCount}
       />
+
+      {/* Dev info panel */}
+      <DevInfoPanel
+        deviceProfile={deviceProfile}
+        battery={battery}
+        inferenceStats={inferenceStats}
+        contextStats={stats}
+        lastEvictionStrategy={lastEvictionStrategy}
+        lastEvictedCount={lastEvictedCount}
+      />
+
     </div>
   );
 }
