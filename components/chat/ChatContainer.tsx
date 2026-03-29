@@ -3,7 +3,8 @@
 
 import { useState, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Message, DeviceProfile } from '@/lib/types';
+// Tutorial Update: Imported Conversation
+import { Message, DeviceProfile, Conversation } from '@/lib/types'; 
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { DevInfoPanel } from '@/components/ui/DevInfoPanel';
@@ -15,6 +16,10 @@ import {
   estimateMessageTokens,
   CONTEXT_TOKEN_BUDGET,
 } from '@/lib/context/tokenCounter';
+
+// Tutorial Update: Added Sync imports
+import { SyncToggle } from '@/components/ui/SyncToggle';
+import { syncConversation } from '@/lib/storage/sync';
 
 interface Props {
   deviceProfile: DeviceProfile;
@@ -45,6 +50,30 @@ export function ChatContainer({ deviceProfile }: Props) {
   });
 
   const currentConvIdRef = useRef<string | null>(null);
+
+  // --- TUTORIAL UPDATE: State Variables ---
+  const [syncEnabled, setSyncEnabled] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const passphraseRef = useRef<string | null>(
+    typeof window !== 'undefined'
+      ? sessionStorage.getItem('vc-passphrase')
+      : null
+  );
+
+  // --- TUTORIAL UPDATE: Helper Function ---
+  async function syncIfEnabled(conversation: Conversation) {
+    if (!syncEnabled || !passphraseRef.current || !navigator.onLine) return;
+    setIsSyncing(true);
+    try {
+      await syncConversation(conversation, passphraseRef.current);
+      setLastSyncTime(Date.now());
+    } catch (err) {
+      console.warn('[Sync] Failed:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }
 
   async function handleSend(content: string) {
     if (isStreaming || isBuildingContext) return;
@@ -138,7 +167,6 @@ export function ChatContainer({ deviceProfile }: Props) {
         });
       }
 
-      // Measure inference performance
       const endTime = Date.now();
       const durationSec =
         (endTime - (firstTokenTime ?? sendTime)) / 1000;
@@ -165,6 +193,17 @@ export function ChatContainer({ deviceProfile }: Props) {
           currentConvIdRef.current,
           completedAssistant
         );
+
+        // --- TUTORIAL UPDATE: Call sync after persisting ---
+        const activeConv = {
+          id: currentConvIdRef.current!,
+          modelUsed: deviceProfile.selectedModel.id,
+          messages: [], // sync uses encrypted blob — messages in blob
+          title: '',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        await syncIfEnabled(activeConv as Conversation);
       }
 
       if (process.env.NODE_ENV === 'development') {
@@ -208,7 +247,6 @@ export function ChatContainer({ deviceProfile }: Props) {
 
   return (
     <div className="flex flex-col h-screen bg-black">
-
       {/* Battery warning */}
       {battery.isLowBattery && (
         <div className="bg-amber-950 border-b border-amber-800 px-6 py-2 flex-shrink-0">
@@ -224,6 +262,14 @@ export function ChatContainer({ deviceProfile }: Props) {
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <h1 className="text-white font-medium">VoidChats</h1>
           <div className="flex items-center gap-4">
+            
+
+            <SyncToggle
+              onSyncEnabledChange={setSyncEnabled}
+              isSyncing={isSyncing}
+              lastSyncTime={lastSyncTime}
+            />
+
             <span className="text-zinc-500 text-xs">
               {deviceProfile.selectedModel.displayName} · local
             </span>
@@ -264,7 +310,6 @@ export function ChatContainer({ deviceProfile }: Props) {
         lastEvictionStrategy={lastEvictionStrategy}
         lastEvictedCount={lastEvictedCount}
       />
-
     </div>
   );
 }
