@@ -1,3 +1,5 @@
+// lib/types/index.ts
+
 export enum ModelStatus {
   UNLOADED = 'unloaded',
   LOADING = 'loading',
@@ -22,6 +24,10 @@ export interface DeviceProfile {
   hasWebGPU: boolean;
   tier: 'low' | 'mid' | 'high';
   selectedModel: ModelConfig;
+  // Added Day 8:
+  gpuVendor: string;
+  gpuArchitecture: string;
+  selectionReason: string;
 }
 
 export interface Message {

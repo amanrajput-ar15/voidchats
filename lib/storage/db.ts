@@ -1,6 +1,6 @@
 // lib/storage/db.ts
 import { openDB, IDBPDatabase } from 'idb';
-import { Conversation, Message } from '@/lib/types';
+import { Conversation } from '@/lib/types';
 
 const DB_NAME = 'voidchats-db';
 const DB_VERSION = 1;

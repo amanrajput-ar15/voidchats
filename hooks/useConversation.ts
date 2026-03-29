@@ -1,7 +1,7 @@
 // hooks/useConversation.ts
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Conversation, Message } from '@/lib/types';
 import {
   saveConversation,
