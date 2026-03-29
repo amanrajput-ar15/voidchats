@@ -2,19 +2,22 @@
 'use client';
 
 import { useState } from 'react';
-import { ChatContainer } from '@/components/chat/ChatContainer';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
 import { useDeviceCapability } from '@/hooks/useDeviceCapability';
 import { DeviceCheck } from '@/components/loading/DeviceCheck';
 import { ModelLoader } from '@/components/loading/ModelLoader';
+import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ModelStatus } from '@/lib/types';
 
 export default function ChatPage() {
   const engine = useWebLLMEngine();
   const deviceProfile = useDeviceCapability();
-  const [modelStatus, setModelStatus] = useState<ModelStatus>(ModelStatus.UNLOADED);
+  const [modelStatus, setModelStatus] = useState<ModelStatus>(
+    ModelStatus.UNLOADED
+  );
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Waiting for device detection
   if (!deviceProfile) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
@@ -23,15 +26,23 @@ export default function ChatPage() {
     );
   }
 
+  // WebGPU gate
   if (!deviceProfile.hasWebGPU) {
     return <DeviceCheck hasWebGPU={false}>{null}</DeviceCheck>;
   }
 
-  if (modelStatus === ModelStatus.UNLOADED || modelStatus === ModelStatus.LOADING) {
+  // Loading screen
+  if (
+    modelStatus === ModelStatus.UNLOADED ||
+    modelStatus === ModelStatus.LOADING
+  ) {
     return (
       <ModelLoader
         model={deviceProfile.selectedModel}
-        onLoad={(onProgress) => engine.load(deviceProfile.selectedModel.id, onProgress)}
+        selectionReason={deviceProfile.selectionReason}
+        onLoad={(onProgress) =>
+          engine.load(deviceProfile.selectedModel.id, onProgress)
+        }
         onReady={() => setModelStatus(ModelStatus.READY)}
         onError={(err) => {
           setErrorMsg(err);
@@ -41,11 +52,14 @@ export default function ChatPage() {
     );
   }
 
+  // Error state
   if (modelStatus === ModelStatus.ERROR) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
         <div className="max-w-sm text-center px-8">
-          <p className="text-red-400 text-sm font-medium mb-2">Failed to load model</p>
+          <p className="text-red-400 text-sm font-medium mb-2">
+            Failed to load model
+          </p>
           <p className="text-zinc-500 text-xs mb-6">{errorMsg}</p>
           <button
             onClick={() => setModelStatus(ModelStatus.UNLOADED)}
@@ -58,5 +72,7 @@ export default function ChatPage() {
     );
   }
 
+  // Chat UI
   return <ChatContainer deviceProfile={deviceProfile} />;
 }
+

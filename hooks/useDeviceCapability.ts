@@ -5,10 +5,12 @@ import { useState, useEffect } from 'react';
 import { DeviceProfile } from '@/lib/types';
 import { selectModel } from '@/lib/webllm/models';
 
+// Extend Navigator for non-standard properties
 interface ExtendedNavigator extends Navigator {
   deviceMemory?: number;
 }
 
+// Minimal GPU adapter types
 interface GPUAdapterInfo {
   vendor?: string;
   architecture?: string;
@@ -30,17 +32,19 @@ export function useDeviceCapability(): DeviceProfile | null {
     async function detect() {
       const nav = navigator as ExtendedNavigator;
 
-      // Step 1 — RAM
+      // RAM — navigator.deviceMemory returns coarse value
+      // Possible values: 0.25, 0.5, 1, 2, 4, 8
+      // Returns undefined in Firefox — default to 4
       const ramGB = nav.deviceMemory ?? 4;
 
-      // Step 2 — CPU
+      // CPU cores
       const cpuCores = navigator.hardwareConcurrency ?? 4;
 
-      // Step 3 — WebGPU
+      // WebGPU availability
       const gpu = (navigator as Navigator & { gpu?: GPUInstance }).gpu;
       const hasWebGPU = !!gpu;
 
-      // Step 4 — GPU vendor + architecture
+      // GPU vendor + architecture from WebGPU adapter
       let gpuVendor = 'unknown';
       let gpuArchitecture = 'unknown';
 
@@ -48,24 +52,30 @@ export function useDeviceCapability(): DeviceProfile | null {
         try {
           const adapter = await gpu.requestAdapter();
           if (adapter) {
+            // Try adapter.info first (Chrome 121+)
             if (adapter.info) {
               gpuVendor = adapter.info.vendor ?? 'unknown';
               gpuArchitecture = adapter.info.architecture ?? 'unknown';
-            } else if (adapter.requestAdapterInfo) {
+            }
+            // Fall back to requestAdapterInfo() (older API)
+            else if (adapter.requestAdapterInfo) {
               const info = await adapter.requestAdapterInfo();
               gpuVendor = info.vendor ?? 'unknown';
               gpuArchitecture = info.architecture ?? 'unknown';
             }
           }
         } catch {
-          console.warn('[useDeviceCapability] Could not get GPU adapter info');
+          // Non-fatal — GPU info unavailable
+          console.warn(
+            '[useDeviceCapability] Could not get GPU adapter info'
+          );
         }
       }
 
-      // Step 5 — Model selection
+      // Model selection
       const { model, tier } = selectModel(ramGB, hasWebGPU);
 
-      // Step 6 — Selection reason
+      // Human-readable selection reason for loading screen
       const selectionReason = buildSelectionReason(
         hasWebGPU,
         ramGB,
@@ -74,7 +84,6 @@ export function useDeviceCapability(): DeviceProfile | null {
         gpuArchitecture
       );
 
-      // Step 7 — Set profile (ALL variables now in scope)
       setProfile({
         ramGB,
         cpuCores,
