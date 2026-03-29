@@ -9,6 +9,7 @@ import { ChatInput } from './ChatInput';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
 import { useContextManager } from '@/hooks/useContextManager';
 import { useConversation } from '@/hooks/useConversation';
+import { useBattery } from '@/hooks/useBattery';
 import {
   estimateMessageTokens,
   CONTEXT_TOKEN_BUDGET,
@@ -20,16 +21,10 @@ interface Props {
 
 export function ChatContainer({ deviceProfile }: Props) {
   const engine = useWebLLMEngine();
-  const {
-    addMessage,
-    buildContextSemantic,
-    clearMessages,
-    getStats,
-  } = useContextManager();
-  const {
-    createConversation,
-    addMessageToConversation,
-  } = useConversation();
+  const { addMessage, buildContextSemantic, clearMessages, getStats } =
+    useContextManager();
+  const { createConversation, addMessageToConversation } = useConversation();
+  const battery = useBattery();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -37,11 +32,33 @@ export function ChatContainer({ deviceProfile }: Props) {
   const [lastEvictionStrategy, setLastEvictionStrategy] = useState('none');
   const [lastEvictedCount, setLastEvictedCount] = useState(0);
 
-  // Tracks the current IndexedDB conversation ID
   const currentConvIdRef = useRef<string | null>(null);
 
   async function handleSend(content: string) {
     if (isStreaming || isBuildingContext) return;
+
+    // Block inference on critically low battery
+    if (battery.isCritical) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uuidv4(),
+          role: 'user',
+          content,
+          timestamp: Date.now(),
+          tokenEstimate: 0,
+        },
+        {
+          id: uuidv4(),
+          role: 'assistant',
+          content:
+            'Battery critically low. Please charge your device before continuing.',
+          timestamp: Date.now(),
+          tokenEstimate: 0,
+        },
+      ]);
+      return;
+    }
 
     const userMessage: Message = {
       id: uuidv4(),
@@ -51,21 +68,14 @@ export function ChatContainer({ deviceProfile }: Props) {
       tokenEstimate: estimateMessageTokens('user', content),
     };
 
-    // Create a new conversation in IndexedDB on first message
     if (!currentConvIdRef.current) {
-      const conv = await createConversation(
-        deviceProfile.selectedModel.id
-      );
+      const conv = await createConversation(deviceProfile.selectedModel.id);
       currentConvIdRef.current = conv.id;
     }
 
-    // Persist user message
     await addMessageToConversation(currentConvIdRef.current, userMessage);
-
-    // Add to context manager
     addMessage(userMessage);
 
-    // Build semantic context window
     setIsBuildingContext(true);
     const contextWindow = await buildContextSemantic(content);
     setIsBuildingContext(false);
@@ -118,10 +128,8 @@ export function ChatContainer({ deviceProfile }: Props) {
         tokenEstimate: estimateMessageTokens('assistant', response),
       };
 
-      // Add to context manager
       addMessage(completedAssistant);
 
-      // Persist assistant message to IndexedDB
       if (currentConvIdRef.current) {
         await addMessageToConversation(
           currentConvIdRef.current,
@@ -165,6 +173,16 @@ export function ChatContainer({ deviceProfile }: Props) {
 
   return (
     <div className="flex flex-col h-screen bg-black">
+
+      {/* Battery warning banner */}
+      {battery.isLowBattery && (
+        <div className="bg-amber-950 border-b border-amber-800 px-6 py-2 flex-shrink-0">
+          <p className="text-amber-400 text-xs text-center max-w-3xl mx-auto">
+            Battery low ({Math.round(battery.level * 100)}%) —
+            connect charger for best performance
+          </p>
+        </div>
+      )}
 
       {/* Header */}
       <div className="border-b border-zinc-800 px-6 py-4 flex-shrink-0">
