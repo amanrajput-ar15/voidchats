@@ -8,7 +8,11 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
 import { useContextManager } from '@/hooks/useContextManager';
-import { estimateMessageTokens, CONTEXT_TOKEN_BUDGET } from '@/lib/context/tokenCounter';
+import { useConversation } from '@/hooks/useConversation';
+import {
+  estimateMessageTokens,
+  CONTEXT_TOKEN_BUDGET,
+} from '@/lib/context/tokenCounter';
 
 interface Props {
   deviceProfile: DeviceProfile;
@@ -22,12 +26,19 @@ export function ChatContainer({ deviceProfile }: Props) {
     clearMessages,
     getStats,
   } = useContextManager();
+  const {
+    createConversation,
+    addMessageToConversation,
+  } = useConversation();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isBuildingContext, setIsBuildingContext] = useState(false);
   const [lastEvictionStrategy, setLastEvictionStrategy] = useState('none');
   const [lastEvictedCount, setLastEvictedCount] = useState(0);
+
+  // Tracks the current IndexedDB conversation ID
+  const currentConvIdRef = useRef<string | null>(null);
 
   async function handleSend(content: string) {
     if (isStreaming || isBuildingContext) return;
@@ -40,7 +51,18 @@ export function ChatContainer({ deviceProfile }: Props) {
       tokenEstimate: estimateMessageTokens('user', content),
     };
 
-    // Add user message to context manager
+    // Create a new conversation in IndexedDB on first message
+    if (!currentConvIdRef.current) {
+      const conv = await createConversation(
+        deviceProfile.selectedModel.id
+      );
+      currentConvIdRef.current = conv.id;
+    }
+
+    // Persist user message
+    await addMessageToConversation(currentConvIdRef.current, userMessage);
+
+    // Add to context manager
     addMessage(userMessage);
 
     // Build semantic context window
@@ -48,7 +70,6 @@ export function ChatContainer({ deviceProfile }: Props) {
     const contextWindow = await buildContextSemantic(content);
     setIsBuildingContext(false);
 
-    // Track eviction stats
     setLastEvictionStrategy(contextWindow.evictionStrategy);
     setLastEvictedCount(contextWindow.evictedCount);
 
@@ -60,11 +81,9 @@ export function ChatContainer({ deviceProfile }: Props) {
       tokenEstimate: 0,
     };
 
-    // Update UI immediately
     setMessages((prev) => [...prev, userMessage, assistantMessage]);
     setIsStreaming(true);
 
-    // Build engine messages: system prompt + context window
     const engineMessages = [
       {
         role: 'system' as const,
@@ -93,15 +112,23 @@ export function ChatContainer({ deviceProfile }: Props) {
         });
       }
 
-      // Add completed assistant message to context manager
       const completedAssistant: Message = {
         ...assistantMessage,
         content: response,
         tokenEstimate: estimateMessageTokens('assistant', response),
       };
+
+      // Add to context manager
       addMessage(completedAssistant);
 
-      // Log context stats in development
+      // Persist assistant message to IndexedDB
+      if (currentConvIdRef.current) {
+        await addMessageToConversation(
+          currentConvIdRef.current,
+          completedAssistant
+        );
+      }
+
       if (process.env.NODE_ENV === 'development') {
         const stats = getStats();
         console.log('[ContextManager]', {
@@ -131,6 +158,7 @@ export function ChatContainer({ deviceProfile }: Props) {
     setMessages([]);
     setLastEvictionStrategy('none');
     setLastEvictedCount(0);
+    currentConvIdRef.current = null;
   }
 
   const stats = getStats();
