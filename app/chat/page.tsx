@@ -7,6 +7,7 @@ import { useDeviceCapability } from '@/hooks/useDeviceCapability';
 import { DeviceCheck } from '@/components/loading/DeviceCheck';
 import { ModelLoader } from '@/components/loading/ModelLoader';
 import { ChatContainer } from '@/components/chat/ChatContainer';
+import { PassphraseSetup } from '@/components/ui/PassphraseSetup';
 import { ModelStatus } from '@/lib/types';
 
 export default function ChatPage() {
@@ -16,6 +17,14 @@ export default function ChatPage() {
     ModelStatus.UNLOADED
   );
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Check sessionStorage for existing passphrase
+  const [passphrase, setPassphrase] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('vc-passphrase');
+    }
+    return null;
+  });
 
   // Waiting for device detection
   if (!deviceProfile) {
@@ -29,6 +38,15 @@ export default function ChatPage() {
   // WebGPU gate
   if (!deviceProfile.hasWebGPU) {
     return <DeviceCheck hasWebGPU={false}>{null}</DeviceCheck>;
+  }
+
+  // Passphrase gate — shown before model loads
+  if (!passphrase) {
+    return (
+      <PassphraseSetup
+        onPassphraseSet={(p) => setPassphrase(p)}
+      />
+    );
   }
 
   // Loading screen
@@ -72,7 +90,6 @@ export default function ChatPage() {
     );
   }
 
-  // Chat UI
+  // Chat
   return <ChatContainer deviceProfile={deviceProfile} />;
 }
-
