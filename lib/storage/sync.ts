@@ -1,7 +1,13 @@
-export {};// lib/storage/sync.ts
+// lib/storage/sync.ts
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Conversation } from '@/lib/types';
-import { encrypt, serializeEncrypted } from './encryption';
+import { 
+  encrypt, 
+  serializeEncrypted, 
+  decrypt, 
+  deserializeEncrypted 
+} from './encryption';
+import { loadConversation, saveConversation } from './db';
 
 // Singleton instance to prevent creating multiple websocket connections
 let supabaseInstance: SupabaseClient | null = null;
@@ -96,4 +102,43 @@ export async function deleteRemoteConversation(id: string): Promise<void> {
     .eq('id', id);
     
   if (error) throw new Error(`Delete failed: ${error.message}`);
+}
+
+/**
+ * Fetches remote conversations, decrypts, merges into local IndexedDB.
+ * Conflict resolution: Last-Write-Wins (remote wins if newer).
+ * Called on Day 16 from the conversation sidebar restore button.
+ */
+export async function syncDownAndMerge(
+  passphrase: string
+): Promise<{ restored: number; failed: number }> {
+  const remoteBlobs = await fetchRemoteConversations();
+  let restoredCount = 0;
+  let failedCount = 0;
+
+  for (const remote of remoteBlobs) {
+    try {
+      const { ciphertext, iv, salt } = deserializeEncrypted(
+        remote.encrypted_blob
+      );
+      const decryptedJson = await decrypt(ciphertext, iv, salt, passphrase);
+      const remoteConv = JSON.parse(decryptedJson);
+      
+      const localConv = await loadConversation(remoteConv.id);
+      
+      // LWW: overwrite local only if remote is newer or local missing
+      if (!localConv || remoteConv.updatedAt > localConv.updatedAt) {
+        await saveConversation(remoteConv);
+        restoredCount++;
+      }
+    } catch (err) {
+      console.error(
+        `[SyncDown] Failed to decrypt conversation ${remote.id}:`,
+        err
+      );
+      failedCount++;
+    }
+  }
+
+  return { restored: restoredCount, failed: failedCount };
 }

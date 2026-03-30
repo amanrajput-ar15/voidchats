@@ -38,8 +38,14 @@ class WebLLMEngine {
     if (!this.engine || this._status !== ModelStatus.READY) {
       throw new Error('Engine not ready. Load model first.');
     }
+
+    // Cancel any pending idle unload — we are about to use the engine
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+
     this._status = ModelStatus.INFERRING;
-    this.resetIdleTimer();
 
     try {
       const stream = await this.engine.chat.completions.create({
@@ -54,22 +60,49 @@ class WebLLMEngine {
         if (delta) yield delta;
       }
     } finally {
+      // Only set READY and restart timer after inference fully completes
       this._status = ModelStatus.READY;
+      this.resetIdleTimer();
     }
   }
 
   async unload(): Promise<void> {
     if (!this.engine) return;
+
+    // NEVER unload during inference — GPU buffers are in use
+    if (this._status === ModelStatus.INFERRING) {
+      console.warn('[WebLLMEngine] Unload requested during inference — skipping');
+      return;
+    }
+
     this._status = ModelStatus.UNLOADING;
-    await this.engine.unload();
-    this.engine = null;
-    this._status = ModelStatus.UNLOADED;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
+
+    try {
+      await this.engine.unload();
+    } catch (err) {
+      console.warn('[WebLLMEngine] Unload error (non-fatal):', err);
+    } finally {
+      this.engine = null;
+      this._status = ModelStatus.UNLOADED;
+      if (this.idleTimer) {
+        clearTimeout(this.idleTimer);
+        this.idleTimer = null;
+      }
+    }
   }
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.unload(), this.IDLE_TIMEOUT_MS);
+
+    this.idleTimer = setTimeout(async () => {
+      // Double-check status before unloading
+      if (this._status === ModelStatus.READY) {
+        console.log('[WebLLMEngine] Idle timeout — unloading model');
+        await this.unload();
+      }
+      // If INFERRING, do nothing — streamCompletion finally block
+      // will call resetIdleTimer() when done
+    }, this.IDLE_TIMEOUT_MS);
   }
 }
 

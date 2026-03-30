@@ -62,14 +62,18 @@ export function ChatContainer({ deviceProfile }: Props) {
   );
 
   // --- TUTORIAL UPDATE: Helper Function ---
-  async function syncIfEnabled(conversation: Conversation) {
+async function syncIfEnabled(conversation: Conversation) {
     if (!syncEnabled || !passphraseRef.current || !navigator.onLine) return;
+    
     setIsSyncing(true);
     try {
       await syncConversation(conversation, passphraseRef.current);
       setLastSyncTime(Date.now());
     } catch (err) {
-      console.warn('[Sync] Failed:', err);
+      // Silently fail — sync is optional, never block the UI
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[Sync] Failed (non-blocking):', err);
+      }
     } finally {
       setIsSyncing(false);
     }

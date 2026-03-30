@@ -4,25 +4,39 @@ import type { FeatureExtractionPipeline } from '@xenova/transformers';
 
 import { Message } from '@/lib/types';
 
-
 // Singleton embedder promise — created once, reused forever
 // NEVER import @xenova/transformers at top level — 40MB bundle penalty
-let embedderPromise: Promise <FeatureExtractionPipeline> | null = null;
+let embedderPromise: Promise<FeatureExtractionPipeline> | null = null;
+// Strong reference to prevent the pipeline from being garbage collected
+let resolvedEmbedder: FeatureExtractionPipeline | null = null;
 
 /**
  * Returns the MiniLM embedder pipeline.
  * Lazy-loaded on first call — downloads ~25MB model on first use.
  * Cached after first load — subsequent calls return instantly.
  */
-async function getEmbedder(): Promise <FeatureExtractionPipeline> {
+async function getEmbedder(): Promise<FeatureExtractionPipeline> {
+  // Return cached resolved instance first — prevents GC issue
+  if (resolvedEmbedder) return resolvedEmbedder;
+
   if (!embedderPromise) {
     embedderPromise = (async () => {
-      // Dynamic import — CRITICAL. Never move this to top of file.
-      const { pipeline } = await import('@xenova/transformers');
-      return await pipeline(
+      // 1. Import BOTH pipeline and env dynamically
+      const { pipeline, env } = await import('@xenova/transformers');
+      
+      // 2. THE FIX: Force remote downloading and enable browser caching
+      env.allowLocalModels = false; // Stop looking on localhost:3000
+      env.useBrowserCache = true;   // Cache it in IndexedDB so it only downloads once
+      
+      const extractor = await pipeline(
         'feature-extraction',
         'Xenova/all-MiniLM-L6-v2'
-      );
+      ) as FeatureExtractionPipeline;
+      
+      // Cache the resolved instance — prevents garbage collection
+      resolvedEmbedder = extractor;
+      
+      return extractor;
     })();
   }
   return embedderPromise;
