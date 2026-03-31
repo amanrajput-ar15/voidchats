@@ -62,7 +62,7 @@ export function ChatContainer({ deviceProfile }: Props) {
   );
 
   // --- TUTORIAL UPDATE: Helper Function ---
-async function syncIfEnabled(conversation: Conversation) {
+  async function syncIfEnabled(conversation: Conversation) {
     if (!syncEnabled || !passphraseRef.current || !navigator.onLine) return;
     
     setIsSyncing(true);
@@ -184,6 +184,27 @@ async function syncIfEnabled(conversation: Conversation) {
         totalTokensGenerated: prev.totalTokensGenerated + tokenCount,
       }));
 
+      // --- NEW TUTORIAL UPDATE: LANGFUSE OBSERVABILITY ---
+      // Fire-and-forget to Langfuse — never block the UI
+      if (navigator.onLine && currentConvIdRef.current) {
+        fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentConvIdRef.current,
+            modelId: deviceProfile.selectedModel.id,
+            tokensPerSecond: tps,
+            latencyMs: latencyMs,
+            // Fallback to getStats() if contextWindow.totalTokens is undefined
+            contextTokens: getStats().estimatedTokens, 
+            evictionStrategy: contextWindow.evictionStrategy,
+            evictedCount: contextWindow.evictedCount,
+            totalTokensGenerated: tokenCount,
+          }),
+        }).catch(() => {}); // intentional fire-and-forget
+      }
+      // --------------------------------------------------
+
       const completedAssistant: Message = {
         ...assistantMessage,
         content: response,
@@ -211,13 +232,13 @@ async function syncIfEnabled(conversation: Conversation) {
       }
 
       if (process.env.NODE_ENV === 'development') {
-        const stats = getStats();
+        const currentStats = getStats();
         console.log('[ContextManager]', {
-          totalMessages: stats.totalMessages,
-          estimatedTokens: stats.estimatedTokens,
+          totalMessages: currentStats.totalMessages,
+          estimatedTokens: currentStats.estimatedTokens,
           evictedCount: contextWindow.evictedCount,
           strategy: contextWindow.evictionStrategy,
-          isNearLimit: stats.isNearLimit,
+          isNearLimit: currentStats.isNearLimit,
         });
         console.log('[Inference]', {
           tokensPerSecond: tps,
@@ -247,7 +268,7 @@ async function syncIfEnabled(conversation: Conversation) {
     currentConvIdRef.current = null;
   }
 
-  const stats = getStats();
+  const currentStats = getStats();
 
   return (
     <div className="flex flex-col h-screen bg-black">
@@ -298,9 +319,9 @@ async function syncIfEnabled(conversation: Conversation) {
         disabled={isStreaming || isBuildingContext}
         isStreaming={isStreaming}
         isBuildingContext={isBuildingContext}
-        usedTokens={stats.estimatedTokens}
+        usedTokens={currentStats.estimatedTokens}
         tokenBudget={CONTEXT_TOKEN_BUDGET}
-        isNearLimit={stats.isNearLimit}
+        isNearLimit={currentStats.isNearLimit}
         evictionStrategy={lastEvictionStrategy}
         evictedCount={lastEvictedCount}
       />
@@ -310,7 +331,7 @@ async function syncIfEnabled(conversation: Conversation) {
         deviceProfile={deviceProfile}
         battery={battery}
         inferenceStats={inferenceStats}
-        contextStats={stats}
+        contextStats={currentStats}
         lastEvictionStrategy={lastEvictionStrategy}
         lastEvictedCount={lastEvictedCount}
       />
