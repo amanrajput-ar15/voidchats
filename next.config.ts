@@ -8,6 +8,8 @@ const withPWA = require('next-pwa')({
   skipWaiting: true,
   // CRITICAL — without this, hot reload breaks in development
   disable: process.env.NODE_ENV === 'development',
+  // Added for Vercel deployment to prevent manifest generation errors
+  buildExcludes: [/middleware-manifest\.json$/],
   runtimeCaching: [
     {
       // Cache the app shell
@@ -25,6 +27,11 @@ const withPWA = require('next-pwa')({
   ],
 });
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  // Added to suppress the 5.98MB WebLLM chunk warning on Vercel
+  experimental: {
+    largePageDataBytes: 128 * 100000,
+  },
+};
 
 export default withPWA(nextConfig);
