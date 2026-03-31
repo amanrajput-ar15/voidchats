@@ -1,25 +1,23 @@
 // components/chat/ChatContainer.tsx
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-// Tutorial Update: Imported Conversation
-import { Message, DeviceProfile, Conversation } from '@/lib/types'; 
+import { Message, DeviceProfile, Conversation } from '@/lib/types';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
+import { AppShell } from '@/components/layout/AppShell';
 import { DevInfoPanel } from '@/components/ui/DevInfoPanel';
+import { SyncToggle } from '@/components/ui/SyncToggle';
 import { useWebLLMEngine } from '@/components/providers/WebLLMProvider';
 import { useContextManager } from '@/hooks/useContextManager';
 import { useConversation } from '@/hooks/useConversation';
 import { useBattery } from '@/hooks/useBattery';
+import { syncConversation } from '@/lib/storage/sync';
 import {
   estimateMessageTokens,
   CONTEXT_TOKEN_BUDGET,
 } from '@/lib/context/tokenCounter';
-
-// Tutorial Update: Added Sync imports
-import { SyncToggle } from '@/components/ui/SyncToggle';
-import { syncConversation } from '@/lib/storage/sync';
 
 interface Props {
   deviceProfile: DeviceProfile;
@@ -33,11 +31,24 @@ interface InferenceStats {
 
 export function ChatContainer({ deviceProfile }: Props) {
   const engine = useWebLLMEngine();
-  const { addMessage, buildContextSemantic, clearMessages, getStats } =
-    useContextManager();
-  const { createConversation, addMessageToConversation } = useConversation();
+  const {
+    addMessage,
+    buildContextSemantic,
+    clearMessages,
+    getStats,
+  } = useContextManager();
+  const {
+    conversations,
+    activeConversationId,
+    setActiveConversationId,
+    createConversation,
+    addMessageToConversation,
+    removeConversation,
+    getActiveConversation,
+  } = useConversation();
+  
   const battery = useBattery();
-
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isBuildingContext, setIsBuildingContext] = useState(false);
@@ -48,29 +59,37 @@ export function ChatContainer({ deviceProfile }: Props) {
     lastLatencyMs: null,
     totalTokensGenerated: 0,
   });
-
-  const currentConvIdRef = useRef<string | null>(null);
-
-  // --- TUTORIAL UPDATE: State Variables ---
+  
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  
+  const currentConvIdRef = useRef<string | null>(null);
   const passphraseRef = useRef<string | null>(
     typeof window !== 'undefined'
       ? sessionStorage.getItem('vc-passphrase')
       : null
   );
 
-  // --- TUTORIAL UPDATE: Helper Function ---
+  // Load messages when active conversation changes
+  useEffect(() => {
+    const conv = getActiveConversation();
+    if (conv && conv.id !== currentConvIdRef.current) {
+      setMessages(conv.messages);
+      currentConvIdRef.current = conv.id;
+      clearMessages();
+      // Re-add messages to context manager
+      conv.messages.forEach((m) => addMessage(m));
+    }
+  }, [activeConversationId]);
+
   async function syncIfEnabled(conversation: Conversation) {
     if (!syncEnabled || !passphraseRef.current || !navigator.onLine) return;
-    
     setIsSyncing(true);
     try {
       await syncConversation(conversation, passphraseRef.current);
       setLastSyncTime(Date.now());
     } catch (err) {
-      // Silently fail — sync is optional, never block the UI
       if (process.env.NODE_ENV === 'development') {
         console.warn('[Sync] Failed (non-blocking):', err);
       }
@@ -81,7 +100,7 @@ export function ChatContainer({ deviceProfile }: Props) {
 
   async function handleSend(content: string) {
     if (isStreaming || isBuildingContext) return;
-
+    
     if (battery.isCritical) {
       setMessages((prev) => [
         ...prev,
@@ -95,8 +114,7 @@ export function ChatContainer({ deviceProfile }: Props) {
         {
           id: uuidv4(),
           role: 'assistant',
-          content:
-            'Battery critically low. Please charge your device before continuing.',
+          content: 'Battery critically low. Please charge before continuing.',
           timestamp: Date.now(),
           tokenEstimate: 0,
         },
@@ -119,11 +137,11 @@ export function ChatContainer({ deviceProfile }: Props) {
 
     await addMessageToConversation(currentConvIdRef.current, userMessage);
     addMessage(userMessage);
-
+    
     setIsBuildingContext(true);
     const contextWindow = await buildContextSemantic(content);
     setIsBuildingContext(false);
-
+    
     setLastEvictionStrategy(contextWindow.evictionStrategy);
     setLastEvictedCount(contextWindow.evictedCount);
 
@@ -172,10 +190,8 @@ export function ChatContainer({ deviceProfile }: Props) {
       }
 
       const endTime = Date.now();
-      const durationSec =
-        (endTime - (firstTokenTime ?? sendTime)) / 1000;
-      const tps =
-        durationSec > 0 ? Math.round(tokenCount / durationSec) : null;
+      const durationSec = (endTime - (firstTokenTime ?? sendTime)) / 1000;
+      const tps = durationSec > 0 ? Math.round(tokenCount / durationSec) : null;
       const latencyMs = firstTokenTime ? firstTokenTime - sendTime : null;
 
       setInferenceStats((prev) => ({
@@ -183,27 +199,6 @@ export function ChatContainer({ deviceProfile }: Props) {
         lastLatencyMs: latencyMs,
         totalTokensGenerated: prev.totalTokensGenerated + tokenCount,
       }));
-
-      // --- NEW TUTORIAL UPDATE: LANGFUSE OBSERVABILITY ---
-      // Fire-and-forget to Langfuse — never block the UI
-      if (navigator.onLine && currentConvIdRef.current) {
-        fetch('/api/log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: currentConvIdRef.current,
-            modelId: deviceProfile.selectedModel.id,
-            tokensPerSecond: tps,
-            latencyMs: latencyMs,
-            // Fallback to getStats() if contextWindow.totalTokens is undefined
-            contextTokens: getStats().estimatedTokens, 
-            evictionStrategy: contextWindow.evictionStrategy,
-            evictedCount: contextWindow.evictedCount,
-            totalTokensGenerated: tokenCount,
-          }),
-        }).catch(() => {}); // intentional fire-and-forget
-      }
-      // --------------------------------------------------
 
       const completedAssistant: Message = {
         ...assistantMessage,
@@ -218,33 +213,36 @@ export function ChatContainer({ deviceProfile }: Props) {
           currentConvIdRef.current,
           completedAssistant
         );
+      }
 
-        // --- TUTORIAL UPDATE: Call sync after persisting ---
-        const activeConv = {
-          id: currentConvIdRef.current!,
-          modelUsed: deviceProfile.selectedModel.id,
-          messages: [], // sync uses encrypted blob — messages in blob
-          title: '',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        await syncIfEnabled(activeConv as Conversation);
+      // Fire-and-forget Langfuse logging
+      if (navigator.onLine && currentConvIdRef.current) {
+        fetch('/api/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: currentConvIdRef.current,
+            modelId: deviceProfile.selectedModel.id,
+            tokensPerSecond: tps,
+            latencyMs,
+            contextTokens: getStats().estimatedTokens, 
+            evictionStrategy: contextWindow.evictionStrategy,
+            evictedCount: contextWindow.evictedCount,
+            totalTokensGenerated: tokenCount,
+          }),
+        }).catch(() => {});
       }
 
       if (process.env.NODE_ENV === 'development') {
-        const currentStats = getStats();
+        const stats = getStats();
         console.log('[ContextManager]', {
-          totalMessages: currentStats.totalMessages,
-          estimatedTokens: currentStats.estimatedTokens,
+          totalMessages: stats.totalMessages,
+          estimatedTokens: stats.estimatedTokens,
           evictedCount: contextWindow.evictedCount,
           strategy: contextWindow.evictionStrategy,
-          isNearLimit: currentStats.isNearLimit,
+          isNearLimit: stats.isNearLimit,
         });
-        console.log('[Inference]', {
-          tokensPerSecond: tps,
-          latencyMs,
-          totalTokens: tokenCount,
-        });
+        console.log('[Inference]', { tokensPerSecond: tps, latencyMs, totalTokens: tokenCount });
       }
     } catch (err) {
       setMessages((prev) => {
@@ -260,58 +258,67 @@ export function ChatContainer({ deviceProfile }: Props) {
     }
   }
 
-  function handleClear() {
+  function handleNewConversation() {
     clearMessages();
     setMessages([]);
     setLastEvictionStrategy('none');
     setLastEvictedCount(0);
     currentConvIdRef.current = null;
+    setActiveConversationId(null);
   }
 
-  const currentStats = getStats();
+  function handleSelectConversation(id: string) {
+    if (id === currentConvIdRef.current) return;
+    setActiveConversationId(id);
+  }
+
+  async function handleDeleteConversation(id: string) {
+    await removeConversation(id);
+    if (id === currentConvIdRef.current) {
+      handleNewConversation();
+    }
+  }
+
+  const stats = getStats();
+
+  const headerRight = (
+    <div className="flex items-center gap-3">
+      <SyncToggle
+        onSyncEnabledChange={setSyncEnabled}
+        isSyncing={isSyncing}
+        lastSyncTime={lastSyncTime}
+      />
+      <span className="text-zinc-600 text-xs hidden md:block">
+        {deviceProfile.selectedModel.displayName} · local
+      </span>
+    </div>
+  );
 
   return (
-    <div className="flex flex-col h-screen bg-black">
+    <AppShell
+      conversations={conversations}
+      activeConversationId={activeConversationId}
+      onSelectConversation={handleSelectConversation}
+      onNewConversation={handleNewConversation}
+      onDeleteConversation={handleDeleteConversation}
+      headerRight={headerRight}
+    >
       {/* Battery warning */}
       {battery.isLowBattery && (
         <div className="bg-amber-950 border-b border-amber-800 px-6 py-2 flex-shrink-0">
-          <p className="text-amber-400 text-xs text-center max-w-3xl mx-auto">
+          <p className="text-amber-400 text-xs text-center">
             Battery low ({Math.round(battery.level * 100)}%) —
             connect charger for best performance
           </p>
         </div>
       )}
 
-      {/* Header */}
-      <div className="border-b border-zinc-800 px-6 py-4 flex-shrink-0">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <h1 className="text-white font-medium">VoidChats</h1>
-          <div className="flex items-center gap-4">
-            
-
-            <SyncToggle
-              onSyncEnabledChange={setSyncEnabled}
-              isSyncing={isSyncing}
-              lastSyncTime={lastSyncTime}
-            />
-
-            <span className="text-zinc-500 text-xs">
-              {deviceProfile.selectedModel.displayName} · local
-            </span>
-            {messages.length > 0 && (
-              <button
-                onClick={handleClear}
-                className="text-zinc-600 hover:text-zinc-400 text-xs transition-colors"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Messages */}
-      <MessageList messages={messages} isStreaming={isStreaming} />
+      <MessageList 
+        messages={messages} 
+        isStreaming={isStreaming} 
+        onSuggestedPrompt={(prompt) => handleSend(prompt)}
+      />
 
       {/* Input */}
       <ChatInput
@@ -319,22 +326,22 @@ export function ChatContainer({ deviceProfile }: Props) {
         disabled={isStreaming || isBuildingContext}
         isStreaming={isStreaming}
         isBuildingContext={isBuildingContext}
-        usedTokens={currentStats.estimatedTokens}
+        usedTokens={stats.estimatedTokens}
         tokenBudget={CONTEXT_TOKEN_BUDGET}
-        isNearLimit={currentStats.isNearLimit}
+        isNearLimit={stats.isNearLimit}
         evictionStrategy={lastEvictionStrategy}
         evictedCount={lastEvictedCount}
       />
 
-      {/* Dev info panel */}
+      {/* Dev panel */}
       <DevInfoPanel
         deviceProfile={deviceProfile}
         battery={battery}
         inferenceStats={inferenceStats}
-        contextStats={currentStats}
+        contextStats={stats}
         lastEvictionStrategy={lastEvictionStrategy}
         lastEvictedCount={lastEvictedCount}
       />
-    </div>
+    </AppShell>
   );
 }
