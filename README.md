@@ -109,7 +109,7 @@ Measured on Intel Iris Xe gen-12lp (integrated GPU), 8GB RAM:
 
 **Requirements:** Chrome 113+ (WebGPU required), Node.js 18+
 ```bash
-git clone https://github.com/YOUR_USERNAME/voidchats.git
+git clone https://github.com/amanrajput-ar15/voidchats.git
 cd voidchats
 npm install
 npm run dev
