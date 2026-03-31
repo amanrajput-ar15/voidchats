@@ -1,4 +1,3 @@
-// hooks/useConversation.ts
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14,12 +13,10 @@ import { v4 as uuidv4 } from 'uuid';
 export function useConversation() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   
-  // FIX: Added the missing '<' for the generic type definition
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load all conversations from IndexedDB on mount
   useEffect(() => {
     async function load() {
       try {
@@ -38,8 +35,8 @@ export function useConversation() {
   }, []);
 
   /**
-   * Creates a new empty conversation and persists it immediately.
-   * Returns the new conversation object.
+    Creates a new empty conversation and persists it immediately.
+    Returns the new conversation object.
    */
   const createConversation = useCallback(
     async (modelUsed: string): Promise<Conversation> => {
@@ -60,9 +57,9 @@ export function useConversation() {
   );
 
   /**
-   * Adds a message to a conversation and persists.
-   * Auto-titles the conversation from the first user message.
-   * Non-blocking — UI updates immediately, DB write is fire-and-forget.
+   Adds a message to a conversation and persists.
+   Auto-titles the conversation from the first user message.
+   *Non-blocking — UI updates immediately, DB write is fire-and-forget.
    */
   const addMessageToConversation = useCallback(
     async (conversationId: string, message: Message): Promise<void> => {
@@ -96,7 +93,7 @@ export function useConversation() {
   );
 
   /**
-   * Deletes a conversation from state and IndexedDB.
+    Deletes a conversation from state and IndexedDB.
    */
   const removeConversation = useCallback(
     async (id: string): Promise<void> => {
@@ -111,7 +108,7 @@ export function useConversation() {
   );
 
   /**
-   * Returns the currently active conversation or null.
+    Returns the currently active conversation or null.
    */
   const getActiveConversation = useCallback((): Conversation | null => {
     if (!activeConversationId) return null;

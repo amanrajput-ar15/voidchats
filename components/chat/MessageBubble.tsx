@@ -1,4 +1,3 @@
-// components/chat/MessageBubble.tsx
 'use client';
 
 interface Props {

@@ -1,4 +1,3 @@
-// app/chat/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -18,7 +17,6 @@ export default function ChatPage() {
   );
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Check sessionStorage for existing passphrase
   const [passphrase, setPassphrase] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return sessionStorage.getItem('vc-passphrase');
@@ -26,7 +24,6 @@ export default function ChatPage() {
     return null;
   });
 
-  // Waiting for device detection
   if (!deviceProfile) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
@@ -35,12 +32,10 @@ export default function ChatPage() {
     );
   }
 
-  // WebGPU gate
   if (!deviceProfile.hasWebGPU) {
     return <DeviceCheck hasWebGPU={false}>{null}</DeviceCheck>;
   }
 
-  // Passphrase gate — shown before model loads
   if (!passphrase) {
     return (
       <PassphraseSetup
@@ -49,7 +44,6 @@ export default function ChatPage() {
     );
   }
 
-  // Loading screen
   if (
     modelStatus === ModelStatus.UNLOADED ||
     modelStatus === ModelStatus.LOADING
@@ -70,7 +64,6 @@ export default function ChatPage() {
     );
   }
 
-  // Error state
   if (modelStatus === ModelStatus.ERROR) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black">
@@ -90,6 +83,5 @@ export default function ChatPage() {
     );
   }
 
-  // Chat
   return <ChatContainer deviceProfile={deviceProfile} />;
 }

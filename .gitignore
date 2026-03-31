@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+#all 
+.env.local
+node_modules/
+.next/
+public/sw.js
+public/workbox-*.js

@@ -29,9 +29,9 @@ export class ContextManager {
   }
 
   /**
-   * FIFO eviction — fills budget from newest to oldest.
-   * Used as fallback when semantic eviction fails.
-   * Also used on short conversations where eviction hasn't kicked in yet.
+ FIFO eviction — fills budget from newest to oldest.
+ Used as fallback when semantic eviction fails.
+ Also used on short conversations where eviction hasn't kicked in yet.
    */
   buildContext(): ContextWindow {
     const systemTokens = estimateMessageTokens('system', this.SYSTEM_PROMPT);
@@ -101,15 +101,7 @@ export class ContextManager {
   }
 
   /**
-   * SEMANTIC eviction — smarter than FIFO.
-   *
-   * Algorithm:
-   * 1. Always keep last RECENCY_ANCHOR exchanges (recency anchor)
-   * 2. Rank older messages by cosine similarity to current query
-   * 3. Greedily fill remaining token budget with most relevant messages
-   * 4. Restore chronological order for the LLM
-   *
-   * Falls back to FIFO if embedding computation fails.
+ SEMANTIC eviction — smarter than FIFO.
    */
   async buildContextSemantic(currentQuery: string): Promise<ContextWindow> {
     const systemTokens = estimateMessageTokens('system', this.SYSTEM_PROMPT);
@@ -183,7 +175,6 @@ export class ContextManager {
         selected.push(message);
         usedTokens += tokens;
       }
-      // Don't break — a later smaller message might still fit
     }
 
     // Restore chronological order — LLM needs time-ordered context
@@ -205,8 +196,8 @@ export class ContextManager {
   }
 
   /**
-   * Returns stats about current context state.
-   * Used by DevInfoPanel (Day 10) and ChatInput footer.
+   Returns stats about current context state.
+                Used by DevInfoPanel and ChatInput footer.
    */
   getStats(): {
     totalMessages: number;

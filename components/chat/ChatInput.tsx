@@ -1,4 +1,3 @@
-// components/chat/ChatInput.tsx
 'use client';
 
 import { useState, KeyboardEvent } from 'react';
@@ -127,48 +126,3 @@ export function ChatInput({
     </div>
   );
 }
-// ```
-
-// ---
-
-// ## STEP 8 — Verify it works
-
-// Hard refresh `Ctrl+Shift+R`. Wait for model to load from cache.
-
-// **Test 1 — Basic semantic eviction:**
-// ```
-// Send: "My name is Aman and I am building VoidChats."
-// Send: "I am learning about WebGPU and edge AI."
-// Send: "What is 2 + 2?"
-// Send: "Tell me about photosynthesis."
-// Send: "What is the capital of France?"
-// Send: "How does React useState work?"
-// Send: "What did I say my name was?"
-// ```
-
-// After the 7th message, open DevTools Console. You should see:
-// ```
-// [ContextManager] {
-//   totalMessages: 14,
-//   estimatedTokens: 800,
-//   evictedCount: 2,
-//   strategy: "semantic",
-//   isNearLimit: false
-// }
-// ```
-
-// The model should answer "Aman" — because semantic eviction kept the
-// name message even though it was the oldest.
-
-// **Test 2 — MiniLM download:**
-// Open Network tab before sending. On the first message that triggers
-// eviction (~5+ messages), you should see:
-// ```
-// Xenova/all-MiniLM-L6-v2/...  200  ~25MB
-// ```
-// This only downloads once. Every subsequent session loads from cache.
-
-// **Test 3 — Footer shows eviction:**
-// After eviction kicks in, the footer should show:
-// ```
-// 2 messages evicted (semantic)     145 / 1500

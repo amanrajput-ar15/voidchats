@@ -1,4 +1,3 @@
-// app/api/log/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 interface LogPayload {
@@ -17,13 +16,11 @@ export async function POST(req: NextRequest) {
   try {
     const body: LogPayload = await req.json();
     
-    // Only log if Langfuse is configured
     const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
     const secretKey = process.env.LANGFUSE_SECRET_KEY;
     const host = process.env.LANGFUSE_HOST;
     
     if (!publicKey || !secretKey || !host || publicKey === 'pk-lf-your-key') {
-      // Langfuse not configured — silently skip
       return NextResponse.json({ ok: true, skipped: true });
     }
     
@@ -62,7 +59,6 @@ export async function POST(req: NextRequest) {
     await langfuse.flushAsync();
     return NextResponse.json({ ok: true });
   } catch (err) {
-    // Never let observability break the app
     console.error('[Langfuse] Log failed:', err);
     return NextResponse.json({ ok: false }, { status: 500 });
   }

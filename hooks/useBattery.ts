@@ -1,4 +1,3 @@
-// hooks/useBattery.ts
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -19,7 +18,7 @@ const DEFAULT_STATE: BatteryState = {
   isSupported: false, // Defaults to false
 };
 
-// 1. Define the missing browser API types strictly
+
 interface BatteryManager extends EventTarget {
   charging: boolean;
   level: number;
@@ -38,7 +37,7 @@ export function useBattery(): BatteryState {
   useEffect(() => {
     const nav = navigator as NavigatorWithBattery;
 
-    // 2. FIX: No synchronous setState needed. State is already DEFAULT.
+   
     if (!nav.getBattery) {
       return; 
     }
@@ -55,7 +54,6 @@ export function useBattery(): BatteryState {
       });
     }
 
-    // 3. FIX: Create a stable reference for the event listener to prevent memory leaks
     const handleBatteryChange = () => {
       if (battery) updateState(battery);
     };
@@ -63,14 +61,12 @@ export function useBattery(): BatteryState {
     nav.getBattery().then((b) => {
       battery = b;
       updateState(b);
-      // Attach the named listener
       b.addEventListener('chargingchange', handleBatteryChange);
       b.addEventListener('levelchange', handleBatteryChange);
     });
 
     return () => {
       if (battery) {
-        // Safely detach using the EXACT same reference
         battery.removeEventListener('chargingchange', handleBatteryChange);
         battery.removeEventListener('levelchange', handleBatteryChange);
       }

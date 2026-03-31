@@ -1,4 +1,3 @@
-// components/ui/DevInfoPanel.tsx
 'use client';
 
 import { useState } from 'react';

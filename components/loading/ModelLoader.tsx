@@ -1,4 +1,3 @@
-// components/loading/ModelLoader.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';

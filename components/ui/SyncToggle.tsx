@@ -1,4 +1,3 @@
-// components/ui/SyncToggle.tsx
 'use client';
 
 import { useState, useEffect } from 'react';

@@ -1,4 +1,3 @@
-// components/ui/PassphraseSetup.tsx
 'use client';
 
 import { useState } from 'react';
